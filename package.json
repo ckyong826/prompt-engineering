@@ -1,0 +1,36 @@
+{
+  "name": "@ckyong826/prompt-engineering",
+  "version": "1.0.0",
+  "description": "Reusable prompt skills for software work. Installs one SKILL.md source into every major coding agent (Claude Code, Cursor, Codex, OpenCode, Gemini CLI, Copilot, and more).",
+  "license": "MIT",
+  "type": "commonjs",
+  "engines": {
+    "node": ">=16"
+  },
+  "bin": {
+    "prompt-eng": "./bin/cli.js",
+    "prompt-engineering": "./bin/cli.js"
+  },
+  "files": [
+    "bin/",
+    "skills/",
+    ".opencode/commands/",
+    "README.md",
+    "install.ps1",
+    "install.sh"
+  ],
+  "keywords": [
+    "prompt-engineering",
+    "agent-skills",
+    "claude-code",
+    "cursor",
+    "codex",
+    "opencode",
+    "slash-commands"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/ckyong826/prompt-engineering.git"
+  },
+  "homepage": "https://github.com/ckyong826/prompt-engineering#readme"
+}
