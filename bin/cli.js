@@ -8,6 +8,7 @@ const path = require("path");
 
 const PKG_ROOT = path.resolve(__dirname, "..");
 const SKILLS_SRC = path.join(PKG_ROOT, "skills");
+const PROMPTS_SRC = path.join(PKG_ROOT, "prompts");
 const COMMANDS_SRC = path.join(PKG_ROOT, ".opencode", "commands");
 
 // Agent target map. project = relative to project dir, global = ~/... .
@@ -59,6 +60,31 @@ function readFrontmatter(file) {
   return out;
 }
 
+function stripFrontmatter(text) {
+  return text.replace(/^\uFEFF/, "").replace(/^---\r?\n[\s\S]*?\r?\n---\r?\n?/, "");
+}
+
+// Plain prompt body for a skill: the SKILL.md without frontmatter.
+// This is what "use as prompt" means: copy it or pipe it anywhere.
+function skillBody(skill) {
+  const raw = fs.readFileSync(path.join(SKILLS_SRC, skill, "SKILL.md"), "utf8");
+  return stripFrontmatter(raw).replace(/^\s+/, "").replace(/\s+$/, "") + "\n";
+}
+
+function skillName(skill) {
+  const fm = readFrontmatter(path.join(SKILLS_SRC, skill, "SKILL.md"));
+  return fm.name || skill;
+}
+
+// Match user input to a skill dir (accepts dir or frontmatter name).
+function resolveSkill(input) {
+  const skills = listSkills();
+  if (skills.includes(input)) return input;
+  const hit = skills.find((s) => skillName(s).toLowerCase() === String(input).toLowerCase());
+  if (!hit) { console.error("Unknown skill: " + input + ". Run list to see names."); process.exit(1); }
+  return hit;
+}
+
 function listSkills() {
   if (!fs.existsSync(SKILLS_SRC)) return [];
   return fs.readdirSync(SKILLS_SRC, { withFileTypes: true })
@@ -95,12 +121,12 @@ function removeDir(dir) {
 }
 
 function parseArgs(argv) {
-  const o = { cmd: "install", global: false, project: false, dir: null,
+  const o = { cmd: "install", target: null, global: false, project: false, dir: null,
     agents: null, skills: null, dryRun: false, json: false, help: false, version: false };
   const rest = [];
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
-    if (a === "install" || a === "list" || a === "doctor" || a === "uninstall") o.cmd = a;
+    if (a === "install" || a === "list" || a === "doctor" || a === "uninstall" || a === "show" || a === "export") o.cmd = a;
     else if (a === "--global" || a === "-g") o.global = true;
     else if (a === "--project" || a === "-p") o.project = true;
     else if (a === "--dir") o.dir = argv[++i];
@@ -112,7 +138,8 @@ function parseArgs(argv) {
     else if (a === "--version" || a === "-V") o.version = true;
     else rest.push(a);
   }
-  if (rest.length && !o.help) { console.error("Unknown args: " + rest.join(" ")); o.help = true; }
+  if (o.cmd === "show" && rest.length === 1) o.target = rest[0];
+  else if (rest.length && !o.help) { console.error("Unknown args: " + rest.join(" ")); o.help = true; }
   return o;
 }
 
@@ -131,6 +158,8 @@ function help() {
     "Commands:",
     "  install     Copy skills into agent directories (default)",
     "  list        Show bundled skills and supported agents",
+    "  show <name> Print one skill as a plain prompt (pipe it anywhere)",
+    "  export      Regenerate prompts/*.md from skills/*/SKILL.md",
     "  doctor      Show which skills are installed where",
     "  uninstall   Remove installed skills",
     "",
@@ -148,6 +177,8 @@ function help() {
     "  npx @ckyong826/prompt-engineering install --project --agent claude-code,cursor",
     "  npx @ckyong826/prompt-engineering install --dir ./my-app --agent opencode",
     "  npx @ckyong826/prompt-engineering doctor",
+    "  npx @ckyong826/prompt-engineering show autonomous-project-build-orchestrator",
+    "  npx @ckyong826/prompt-engineering show autonomous-project-build-orchestrator | codex exec -",
   ].join("\n"));
 }
 
@@ -170,6 +201,9 @@ function cmdList(opts) {
   for (const s of skills) console.log("  - " + s.name + (s.description ? " : " + s.description : ""));
   console.log("Commands (" + listCommands().length + "):");
   for (const c of listCommands()) console.log("  - /" + c.replace(/\.md$/, ""));
+  const promptFiles = listSkills().filter((s) => fs.existsSync(path.join(PROMPTS_SRC, s + ".md")));
+  console.log("Prompt files (" + promptFiles.length + "/" + skills.length + " in prompts/):");
+  for (const s of promptFiles) console.log("  - prompts/" + s + ".md");
   console.log("Agents (" + agents.length + "):");
   for (const a of agents) console.log("  - " + a.key + " (" + a.label + ") project=" + a.project + " global=" + a.global);
 }
@@ -194,6 +228,38 @@ function planCopies(opts) {
     }
   }
   return { copies, isGlobal, base };
+}
+
+function cmdShow(opts) {
+  if (!opts.target) { console.error("Usage: prompt-eng show <skill>. Run list to see names."); process.exit(1); }
+  const skill = resolveSkill(opts.target);
+  const p = path.join(PROMPTS_SRC, skill + ".md");
+  // prompts/*.md is pure body; SKILL.md body is the fallback. Stdout only.
+  if (fs.existsSync(p)) process.stdout.write(fs.readFileSync(p, "utf8"));
+  else process.stdout.write(skillBody(skill));
+}
+
+function cmdExport(opts) {
+  const skills = listSkills();
+  if (!skills.length) { console.error("No skills found in " + SKILLS_SRC); process.exit(1); }
+  fs.mkdirSync(PROMPTS_SRC, { recursive: true });
+  let done = 0;
+  for (const s of skills) {
+    const dest = path.join(PROMPTS_SRC, s + ".md");
+    if (opts.dryRun) { console.log("[dry-run] export prompts/" + s + ".md"); continue; }
+    fs.writeFileSync(dest, skillBody(s), "utf8");
+    console.log("[OK] export prompts/" + s + ".md");
+    done++;
+  }
+  if (!opts.dryRun) console.log(done + " prompt file(s) written to prompts/.");
+}
+
+function promptRows() {
+  return listSkills().map((s) => {
+    const p = path.join(PROMPTS_SRC, s + ".md");
+    const synced = fs.existsSync(p) && fs.readFileSync(p, "utf8") === skillBody(s);
+    return { skill: s, path: p, synced };
+  });
 }
 
 function cmdInstall(opts) {
@@ -225,10 +291,12 @@ function cmdDoctor(opts) {
       rows.push({ agent: k, skill: s, path: path.join(root, s), installed: hit });
     }
   }
-  if (opts.json) { console.log(JSON.stringify(rows, null, 2)); return; }
+  if (opts.json) { console.log(JSON.stringify({ skills: rows, prompts: promptRows() }, null, 2)); return; }
   const scope = isGlobal ? "global" : "project " + base;
   console.log("Skill status (" + scope + "):");
   for (const r of rows) console.log("  [" + (r.installed ? "OK" : "--") + "] " + r.agent + " / " + r.skill + " " + r.path);
+  console.log("Prompt files (prompts/):");
+  for (const p of promptRows()) console.log("  [" + (p.synced ? "OK" : "DRIFT run export") + "] " + p.skill + " " + p.path);
 }
 
 function cmdUninstall(opts) {
@@ -252,6 +320,8 @@ function main() {
   if (opts.help) { help(); return; }
   if (!opts.project && !opts.dir) opts.global = true; // default scope
   if (opts.cmd === "list") cmdList(opts);
+  else if (opts.cmd === "show") cmdShow(opts);
+  else if (opts.cmd === "export") cmdExport(opts);
   else if (opts.cmd === "doctor") cmdDoctor(opts);
   else if (opts.cmd === "uninstall") cmdUninstall(opts);
   else cmdInstall(opts);

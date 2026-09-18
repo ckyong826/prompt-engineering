@@ -11,9 +11,13 @@
     "prompt-eng": "./bin/cli.js",
     "prompt-engineering": "./bin/cli.js"
   },
+  "scripts": {
+    "export": "node bin/cli.js export"
+  },
   "files": [
     "bin/",
     "skills/",
+    "prompts/",
     ".opencode/commands/",
     "README.md",
     "install.ps1",

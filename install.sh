@@ -8,6 +8,7 @@
 #   ./install.sh --doctor [--global|--project] [--dir PATH]
 #   ./install.sh --uninstall [--global|--project] [--dir PATH]
 #   ./install.sh --dry-run [--global|--project]
+#   ./install.sh show <skill-name>   (print as plain prompt, pipe it anywhere)
 #
 # Remote install without cloning:
 #   git clone --depth 1 https://github.com/ckyong826/prompt-engineering.git
@@ -72,6 +73,7 @@ TARGET_DIR=""
 WANT_AGENTS="all"
 WANT_SKILLS="all"
 DRY_RUN=0
+SHOWNAME=""
 
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -79,6 +81,7 @@ while [ $# -gt 0 ]; do
     list|--list) CMD="list"; shift ;;
     doctor|--doctor) CMD="doctor"; shift ;;
     uninstall|--uninstall) CMD="uninstall"; shift ;;
+    show|--show) CMD="show"; SHOWNAME="$2"; shift 2 ;;
     --global) SCOPE="global"; shift ;;
     --project) SCOPE="project"; shift ;;
     --dir) TARGET_DIR="$2"; SCOPE="project"; shift 2 ;;
@@ -122,6 +125,30 @@ for s in $WANT_SKILLS; do
   if [ ! -f "$SRC_ROOT/skills/$s/SKILL.md" ]; then echo "Unknown skill: $s" >&2; exit 1; fi
 done
 
+# print one skill as a plain prompt (stdout only, pipe-friendly)
+if [ "$CMD" = "show" ]; then
+  if [ -z "$SHOWNAME" ]; then echo "Usage: $0 show <skill-name>" >&2; exit 1; fi
+  found=""
+  for s in $BUNDLED; do
+    if [ "$s" = "$SHOWNAME" ]; then found="$s"; break; fi
+  done
+  if [ -z "$found" ]; then
+    low="$(echo "$SHOWNAME" | tr 'A-Z' 'a-z')"
+    for s in $BUNDLED; do
+      if [ "$(echo "$s" | tr 'A-Z' 'a-z')" = "$low" ]; then found="$s"; break; fi
+    done
+  fi
+  if [ -z "$found" ]; then echo "Unknown skill: $SHOWNAME" >&2; exit 1; fi
+  if [ -f "$SRC_ROOT/prompts/$found.md" ]; then cat "$SRC_ROOT/prompts/$found.md"; exit 0; fi
+  f="$SRC_ROOT/skills/$found/SKILL.md"
+  if [ "$(head -c 3 "$f" | od -An -tx1 | tr -d ' \n')" = "efbbbf" ]; then
+    tail -c +4 "$f"
+  else
+    cat "$f"
+  fi | awk 'NR==1 && $0=="---" {skip=1; next} skip && $0=="---" {skip=0; next} !skip {print}'
+  exit 0
+fi
+
 base_for() {
   if [ "$SCOPE" = "global" ]; then
     agent_global "$1"
@@ -138,6 +165,14 @@ if [ "$CMD" = "list" ]; then
   for f in "$SRC_ROOT"/.opencode/commands/*.md; do
     [ -e "$f" ] || continue
     echo "  - /$(basename "$f" .md)"
+  done
+  echo "Prompt files:"
+  for s in $BUNDLED; do
+    if [ -f "$SRC_ROOT/prompts/$s.md" ]; then
+      echo "  - prompts/$s.md"
+    else
+      echo "  - prompts/$s.md (missing)"
+    fi
   done
   echo "Agents: $ALL_AGENTS"
   exit 0

@@ -1,4 +1,4 @@
-<#
+﻿<#
 .SYNOPSIS
   Install prompt-engineering skills into coding agents (Windows, Linux, macOS).
 .DESCRIPTION
@@ -12,6 +12,9 @@
 .EXAMPLE
   .\install.ps1 -Project -Agent claude-code,cursor
   Install into the current project for Claude Code and Cursor only.
+.EXAMPLE
+  .\install.ps1 -Show autonomous-project-build-orchestrator
+  Print one skill as a plain prompt (pipe it into any agent CLI).
 .EXAMPLE
   .\install.ps1 -List
   Show bundled skills and supported agents.
@@ -31,6 +34,7 @@ param(
   [switch]$Uninstall,
   [switch]$DryRun,
   [switch]$Remote,
+  [string]$Show = "",
   [string]$RepoUrl = "https://github.com/ckyong826/prompt-engineering",
   [string]$Branch = "main",
   [string]$Source = ""
@@ -119,15 +123,40 @@ function Split-List([string]$v) {
   return ($v.Split(",") | ForEach-Object { $_.Trim().ToLowerInvariant() } | Where-Object { $_ -ne "" })
 }
 
+function Get-SkillBody([string]$root, [string]$skill) {
+  $file = Join-Path $root (Join-Path "skills" (Join-Path $skill "SKILL.md"))
+  $raw = Get-Content -LiteralPath $file -Raw
+  $raw = $raw -replace '^\uFEFF', ''
+  $m = [regex]::Match($raw, '\A---\r?\n.*?\r?\n---\r?\n?', [System.Text.RegularExpressions.RegexOptions]::Singleline)
+  if ($m.Success) { $raw = $raw.Substring($m.Length) }
+  return ($raw.TrimEnd() + "`n")
+}
+
 # --- main ---
 $table = Get-AgentTable
 $root = Resolve-SourceRoot -Explicit $Source -UseRemote:$Remote -Url $RepoUrl -Br $Branch
 $allSkills = Get-BundledSkills $root
 $allCommands = Get-BundledCommands $root
 
+if ($Show -ne "") {
+  $match = @($allSkills | Where-Object { $_ -eq $Show })
+  if ($match.Count -eq 0) { $match = @($allSkills | Where-Object { $_.ToLowerInvariant() -eq $Show.ToLowerInvariant() }) }
+  if ($match.Count -eq 0) { throw ("Unknown skill: " + $Show) }
+  $pf = Join-Path $root (Join-Path "prompts" ($match[0] + ".md"))
+  if (Test-Path -LiteralPath $pf) { Write-Output (Get-Content -LiteralPath $pf -Raw) }
+  else { Write-Output (Get-SkillBody $root $match[0]) }
+  return
+}
+
 if ($List) {
   Write-Host ("Skills (" + $allSkills.Count + "):")
   foreach ($s in $allSkills) { Write-Host ("  - " + $s) }
+  Write-Host "Prompt files (prompts/):"
+  foreach ($s in $allSkills) {
+    $pf = Join-Path $root (Join-Path "prompts" ($s + ".md"))
+    if (Test-Path -LiteralPath $pf) { Write-Host ("  - prompts/" + $s + ".md") }
+    else { Write-Host ("  - prompts/" + $s + ".md (missing)") }
+  }
   Write-Host ("Commands (" + $allCommands.Count + "):")
   foreach ($c in $allCommands) { Write-Host ("  - /" + $c.Replace(".md", "")) }
   Write-Host "Agents:"
@@ -217,3 +246,5 @@ else {
   if ($isGlobal) { Write-Host ($done.ToString() + " item(s) installed globally. Restart your agent to pick them up.") }
   else { Write-Host ($done.ToString() + " item(s) installed into " + $useProjectBase + ". Restart your agent to pick them up.") }
 }
+
+
